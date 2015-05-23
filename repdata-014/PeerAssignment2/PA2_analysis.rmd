@@ -1,0 +1,157 @@
+---
+title: "Peer Assessmet 2 - which natural events impact health and economy in the United States"
+author: "Soumya Das Bhaumik"
+date: "May 22, 2015"
+output: html_document
+---
+
+## Synopsis
+This report analyzes storms and severe weather events in the U.S.A. based on
+their health and economic impact to give an assessment of which events cause
+the highest economic impact and health impact. The **Data Analysis** section
+describes in detail the steps taken to analyze the data, from loading the raw 
+data to processing it for the assessment. The **Results** section covers the 
+findings, which indicate that **Tornadoes** by far have the highest impact from
+the perspective of population health as well as economy.
+
+##Data Analysis
+The analysis has been done on the U.S. National Oceanic and Atmospheric 
+Administration's (NOAA) storm database, which has been downloaded from the 
+following location on May 22, 2015 at 10:01 PM EST:  
+https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2  
+The downloaded csv.bz2 file needs to be placed in a subdirectory called **Data**
+
+```{r cache=TRUE}
+# load the raw data
+stormDataRaw = read.csv("data/repdata-data-StormData.csv.bz2")
+```
+
+We now modify the property and crop damage colums so that they can be
+mathematically compared. This means multiplying elements of the PROPDMG 
+(or CROPDMG) column by 1000 or 1 million depending on the string 'K' or 'M' 
+respectively in the PROPDMGEXP (or CROPDMGEXP) column.
+
+```{r}
+# this function returns the corresponding number for 'K' or 'M'
+getMultiplierForEXP <- function(expString)
+{
+    multiplier = 1
+    if (expString == "K")
+    {
+        multiplier = 1000
+    }
+    else if (expString == "M")
+    {
+        multiplier = 1000000
+    }
+    multiplier
+}
+
+# update the property damage and crop damage columns to have the same unit
+# so that we can do statistical computations on them
+stormDataRaw$PROPDMGEXP = sapply(stormDataRaw$PROPDMGEXP, getMultiplierForEXP)
+stormDataRaw$CROPDMGEXP = sapply(stormDataRaw$CROPDMGEXP, getMultiplierForEXP)
+
+stormDataRaw$PROPDMG = stormDataRaw$PROPDMG * stormDataRaw$PROPDMGEXP
+stormDataRaw$CROPDMG = stormDataRaw$CROPDMG * stormDataRaw$CROPDMGEXP
+
+```
+
+The data is then reshaped to be indexed on the event type.
+
+```{r}
+library(reshape2)
+# reshape and cast the data based on event type
+stormDataBasedOnType = melt(stormDataRaw, id="EVTYPE", 
+                            measure.vars = c("FATALITIES", "INJURIES", 
+                                             "PROPDMG", "CROPDMG"))
+stormNetImpactBasedOnType = dcast(stormDataBasedOnType, EVTYPE ~ variable, sum)
+```
+
+Now that we have the data summed and categorized by storm type, we work on 
+answering the questions:
+
+1. Across the United States, which types of events (as indicated in the EVTYPE 
+variable) are most harmful with respect to population health?  
+
+For this, we use the fatalities and injuries columns. We just add the two data
+points for each event type to get a total impact to population health for each 
+event. We compute the max and also prepare the data for a graph which will be 
+shared in the results section. That graph will include the top 25 impacting 
+events
+```{r}
+stormNetImpactBasedOnType$HealthImpact = stormNetImpactBasedOnType$FATALITIES +
+                                            stormNetImpactBasedOnType$INJURIES
+
+# compute which event has the highest health impact
+maxIdx = which.max(stormNetImpactBasedOnType$HealthImpact)
+maxStormType = stormNetImpactBasedOnType[maxIdx,"EVTYPE"]
+
+# prepare dataset for graphical representation. 
+stormHealthImpactForPlot = stormNetImpactBasedOnType[
+                            with(stormNetImpactBasedOnType, 
+                                 order(-HealthImpact)),]
+
+stormHealthImpactForPlot = stormHealthImpactForPlot[1:25,]
+
+```
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+For this, we use the PROPDMG and CROPDMG columns. We just add the two data
+points for each event type to get a total impact to the economy for each event.
+Even here, we prepare the data for graphical representation. For the graph, we
+just consider the top 25 impacting events.
+```{r}
+stormNetImpactBasedOnType$EconImpact = stormNetImpactBasedOnType$PROPDMG +
+                                        stormNetImpactBasedOnType$CROPDMG
+
+# compute which event had the maximum economic impact
+maxEcon = which.max(stormNetImpactBasedOnType$EconImpact)
+maxStormEcon = stormNetImpactBasedOnType[maxEcon, "EVTYPE"]
+
+# prepare the dataset for graphical representation
+stormEconImpactForPlot = stormNetImpactBasedOnType[
+                            with(stormNetImpactBasedOnType, 
+                                 order(-EconImpact)),]
+
+stormEconImpactForPlot = stormEconImpactForPlot[1:25,]
+```
+
+
+## Results
+The results of the analysis are presented here  
+
+### Natural events with the highest health impact
+Here is are the results for which types of events are the most harmful with 
+respect to population health
+```{r}
+par(las=2)
+par(mar=c(5,10,4,2))
+barplot(stormHealthImpactForPlot$HealthImpact, 
+        names.arg = stormHealthImpactForPlot$EVTYPE, 
+        horiz = TRUE, cex.names = 0.5,
+        main = "Top 25 population health impacting events")
+```
+  
+The bar plot includes the top 25 events base on health impact. From the graph,
+it is clear that **Tornadoes** have the most significant impact on population
+health and it exceeds the next most impactful event by over an order of 
+magnitude  
+
+### Natural events with the highest econmic impact
+Here are the results for which types of events are the most harmful with respect
+to the economy
+```{r}
+par(las=2)
+par(mar=c(5,10,4,2))
+barplot(stormEconImpactForPlot$EconImpact, 
+        names.arg = stormEconImpactForPlot$EVTYPE, 
+        horiz=TRUE, cex.names=0.5,
+        main = "Top 25 economy impacting events")
+```
+  
+The bar plot includes the top 25 events based on economic impact. From the 
+graph, again it is evident that **Tornadoes** have the highest impact. Tornadoes
+are followed by **Floods**, **Flash Floods** and **Hail** in terms of economic 
+impact.
