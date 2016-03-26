@@ -1,0 +1,129 @@
+---
+title: "Predicting the correctness of an exercise"
+author: "Soumya Das Bhaumik"
+output: html_document
+---
+
+## Executive Summary
+In this report, we analyze the physical activity data from a number of participants that did a barbell exercise and predict the type of error they will do when performing the exercise.
+
+## Exploratory data analysis
+We start by loading the training and test data. The data from the testing csv will be used as validation while the data from the training csv is split into training and test sets
+```{r}
+set.seed(33833)
+library(caret)
+library(randomForest)
+trainData = read.csv("data/pml-training.csv", na.strings = c("","NA", "#DIV/0!"))
+inTrain = createDataPartition(trainData$classe, p = 3/4)[[1]]
+training = trainData[ inTrain,]
+testing = trainData[-inTrain,] 
+validation = read.csv("data/pml-testing.csv", na.strings = c("","NA", "#DIV/0!"))
+ncol(training)
+colnames(training)
+```
+There are 160 data points including the "classe" variable, so a total of 159 potential predictors. A simplistic approach would be to include all 159 variables as predictors. However, that may not be the appropriate approach as it does not take into account any of the context behind the data and blindly tries to build the model. Understanding the context behind the data might useful to build the data. 
+
+## Building the model
+Upon reading the analysis in the associated research paper [1], we see that there are 17 variables associated with the various activities pertaining to the barbell that determine the correctness of the exercise. All of these variables were aggregate calculations of the accelerometer, gyroscope, magnetometer associated with the belt, arm, forearm and dumbbell. For example, the authors of the paper are interested in the maximum, range and variance of the accelerometer vector. All of hese values could be derived from the raw accelerometer measurements of the belt, which are stored in the variables total_accel_belt,  accel_belt_x, accel_belt_y and accel_belt_z. So, those variables are included in the model. If those aggregate values were relevant to the correctness of the exercise, then it is fair to assume that the raw values on the basis of which the aggregate values were calculated are relevant variables to be included in the model
+
+Continuing the approach as used in the example above, we decided to use the raw data that would have been used to calculate those values and thus take the x, y, and z measurements of the accelerometer, gyroscope, magnetometer associated with the belt, arm, forearm and dumbbell. The actual mapping of the features extracted for the model as mentioned in the research paper to the variables chosen from the training set is shown below:
+
+Feature | Training Set Variable
+--------|-----------------------
+Belt - mean and variance of the roll | roll_belt
+Belt - maximum, range and variance of accelerometer vector | total_accel_belt, accel_belt_x, accel_belt_y, accel_belt_z
+Belt - variance of the gyro | gyros_belt_x, gyros_belt_y, gyros_belt_z
+Belt - variance of the magnetometer | magnet_belt_x, magnet_belt_y, magnet_belt_z
+Arm - variance of the accelerometer vector | total_accel_arm, accel_arm_x, accel_arm_y, accel_arm_z
+Arm - maximum and minimum of the magnetometer | magnet_arm_x, magnet_arm_y, magnet_arm_z
+Dumbbell - maximum of the acceleration | total_accel_dumbbell, accel_dumbbell_x, accel_dumbbell_y, accel_dumbbell_z
+Dumbbell - variance of the gyro | gyros_dumbbell_x, gyros_dumbbell_y, gyros_dumbbell_z
+Dumbbell - maximum and minimum of the magnetometer | magnet_dumbbell_x, magnet_dumbbell_y, magnet_dumbbell_z
+Glove - sum of the pitch | pitch_forearm
+Glove - maximum and minimum of the gyro | gyros_forearm_x, gyros_forearm_y, gyros_forearm_z 
+
+By this approach, we narrow down the variables to 32 columns of predictors (from the inital set of 159). We use them to build a the models. We will build and compare two methods: Random Forests and Boosting. In both cases, the model is built on 75% of the the data from the pml-testing.csv file while the remaining 25% will be used to test the accuracy of the model
+
+```{r}
+ModelCols = c("roll_belt", 
+              "total_accel_belt", 
+              "accel_belt_x", "accel_belt_y", "accel_belt_z", 
+              "gyros_belt_x", "gyros_belt_y", "gyros_belt_z",
+              "magnet_belt_x", "magnet_belt_y", "magnet_belt_z",
+              "total_accel_arm",
+              "accel_arm_x", "accel_arm_y", "accel_arm_z",
+              "magnet_arm_x", "magnet_arm_y", "magnet_arm_z",
+              "total_accel_dumbbell",
+              "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z",
+              "gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z",
+              "magnet_dumbbell_x", "magnet_dumbbell_y", "magnet_dumbbell_z",
+              "pitch_forearm",
+              "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_z", 
+              "classe")
+
+training = training[,ModelCols]
+testing = testing[,ModelCols]
+
+```
+
+### Using the Random Forest Method
+Let us first use the Random Forest Method on the data. Some additional points about this method:
+
+* cross validation approach:  k-fold cross validation with 10 folds
+* Parallel processing to improve the time taken to build the model.
+
+```{r}
+
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv", number = 3, allowParallel = TRUE)
+mod_rf = train(classe~ ., method = "rf", data = training, trControl = fitControl, prox=TRUE, na.action = na.roughfix)
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+Now, let us validate it on the training data set that was taken from the original training dataset:
+```{r}
+pred = predict(mod_rf, newdata = testing, na.action = na.roughfix)
+cf_rf = confusionMatrix(pred, testing$classe)
+cf_rf
+```
+From the confusion matrix, we see that the accuracy is 98.67%.
+out of sample error rate: 
+
+### Using the Boosting method
+Let us see how good a Boosting based model performs.
+```{r}
+mod_gbm = train(classe~., method = "gbm", data = training, verbose=FALSE)
+pred_gbm = predict(mod_gbm, newdata = testing, na.action = na.roughfix)
+cf_gbm = confusionMatrix(pred_gbm, testing$classe)
+cf_gbm
+```
+From the confusion matrix, we see that we get an accuracy of 92.13%.
+out of sample error rate: 
+
+### Choosing the method
+Given the higher accuracy rate, we decided to adopt the model built with the **Random Forests** approach.
+
+##Results: Assessing with the validation set
+Now let measure the random forest model with the validation set
+```{r}
+validation = validation[,ModelCols[1:32]]
+pred_Validation = predict(mod_rf, newdata = validation, na.action = na.roughfix)
+pred_Validation
+```
+
+Assessing against the online quiz, we get 100% alignment between the predicted values and the actual values. The **out of sample error rate** turns out to be 0% with the validation set, even though the accuracy while building the model was 98.67%.
+
+## References:
+1. Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. [Qualitative Activity Recognition of Weight Lifting Exercises](http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf). Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+
+
+
+
+
+
